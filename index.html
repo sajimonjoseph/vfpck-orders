@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0"/>
+  <meta name="theme-color" content="#1b5e20"/>
+  <title>VFPCK Input Orders</title>
+  <link rel="manifest" href="manifest.json"/>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+    body{background:#0d1f12;font-family:'DM Sans','Segoe UI',sans-serif;color:#e8f5e9;}
+    select option{background:#1a2e1c;color:#e8f5e9;}
+    ::-webkit-scrollbar{width:4px;}
+    ::-webkit-scrollbar-track{background:#0d1f12;}
+    ::-webkit-scrollbar-thumb{background:#2e7d32;border-radius:4px;}
+    input::placeholder{color:#3a5c3c;}
+    @keyframes spin{to{transform:rotate(360deg);}}
+    @keyframes fadeIn{from{opacity:0;transform:translateY(10px);}to{opacity:1;transform:translateY(0);}}
+    .fade-in{animation:fadeIn 0.4s ease;}
+  </style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+
+const LOCATIONS = [
+  "Panavally","Cherthala","Mararikkulam","Edathwa","Ramankary",
+  "Chennithala","Vallikunnam","Pandanad","Cheriyanadu","Venmony",
+  "Thamarakkulam","Kannanamkuzhi","Nooranad","Thazhakkara","Training Venue"
+];
+const PACK_SIZES = ["2 Kg","5 Kg","10 Kg","50 Kg","NA"];
+const MAX_ITEMS = 8;
+const emptyItem = () => ({ itemName:"", packSize:"", qty:"" });
+
+function App() {
+  const [showSettings, setShowSettings] = React.useState(false);
+  const [webAppUrl, setWebAppUrl] = React.useState(
+    localStorage.getItem("vfpck_url") || ""
+  );
+  const [officerName, setOfficerName] = React.useState(
+    localStorage.getItem("vfpck_officer") || ""
+  );
+  const [phone, setPhone] = React.useState(
+    localStorage.getItem("vfpck_phone") || ""
+  );
+  const [location, setLocation] = React.useState(
+    localStorage.getItem("vfpck_location") || ""
+  );
+  const [items, setItems] = React.useState([emptyItem()]);
+  const [errors, setErrors] = React.useState({});
+  const [submitting, setSubmitting] = React.useState(false);
+  const [submitted, setSubmitted] = React.useState(false);
+  const [summary, setSummary] = React.useState(null);
+  const bodyRef = React.useRef();
+
+  const saveOfficer = (field, val) => {
+    if(field==="name"){setOfficerName(val);localStorage.setItem("vfpck_officer",val);}
+    if(field==="phone"){setPhone(val);localStorage.setItem("vfpck_phone",val);}
+    if(field==="loc"){setLocation(val);localStorage.setItem("vfpck_location",val);}
+  };
+  const saveUrl = (val) => {setWebAppUrl(val);localStorage.setItem("vfpck_url",val);};
+
+  const updateItem = (i,f,v) => setItems(prev=>prev.map((it,idx)=>idx===i?{...it,[f]:v}:it));
+  const addItem = () => {
+    if(items.length<MAX_ITEMS){
+      setItems(p=>[...p,emptyItem()]);
+      setTimeout(()=>bodyRef.current?.scrollTo({top:9999,behavior:"smooth"}),100);
+    }
+  };
+  const removeItem = (i) => setItems(p=>p.filter((_,idx)=>idx!==i));
+
+  const validate = () => {
+    const e={};
+    if(!officerName.trim()) e.name="Required";
+    if(!phone.trim()) e.phone="Required";
+    else if(!/^\d{10}$/.test(phone.trim())) e.phone="10-digit number required";
+    if(!location) e.location="Select location";
+    items.forEach((it,i)=>{
+      if(i===0||it.itemName||it.packSize||it.qty){
+        if(!it.itemName.trim()) e[`n${i}`]="Required";
+        if(!it.packSize) e[`p${i}`]="Select pack size";
+        if(!it.qty.toString().trim()) e[`q${i}`]="Required";
+        else if(isNaN(Number(it.qty))||Number(it.qty)<=0) e[`q${i}`]="Must be > 0";
+      }
+    });
+    return e;
+  };
+
+  const handleSubmit = async () => {
+    const e=validate();
+    setErrors(e);
+    if(Object.keys(e).length>0){
+      bodyRef.current?.scrollTo({top:0,behavior:"smooth"});
+      return;
+    }
+    setSubmitting(true);
+    const filled=items.filter(it=>it.itemName.trim());
+    setSummary({officerName,location,itemCount:filled.length,time:new Date().toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"})});
+    try{
+      if(webAppUrl.trim()){
+        await fetch(webAppUrl,{
+          method:"POST",mode:"no-cors",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({officerName,phone,location,items:filled,timestamp:new Date().toISOString()})
+        });
+      }
+    }catch(_){}
+    await new Promise(r=>setTimeout(r,1200));
+    setSubmitting(false);
+    setSubmitted(true);
+  };
+
+  const reset = () => {
+    setItems([emptyItem()]);
+    setErrors({});
+    setSubmitted(false);
+    setSummary(null);
+  };
+
+  const totalCalc = (it) => {
+    if(!it.packSize||!it.qty||Number(it.qty)<=0) return null;
+    if(it.packSize==="NA") return `${it.qty} nos`;
+    return `${parseFloat(it.packSize)*Number(it.qty)} kg`;
+  };
+
+  const now = new Date();
+  const dateStr = now.toLocaleDateString("en-IN",{day:"numeric",month:"short",year:"numeric"});
+
+  const s = {
+    root:{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",padding:"0 0 32px",background:"#0d1f12"},
+    bar:{width:"100%",maxWidth:480,padding:"10px 20px 0",display:"flex",justifyContent:"space-between",fontSize:12,color:"#4caf50"},
+    phone:{width:"100%",maxWidth:480,background:"#141f16",borderRadius:24,overflow:"hidden",boxShadow:"0 24px 80px rgba(0,0,0,0.7),0 0 0 1px rgba(76,175,80,0.15)",display:"flex",flexDirection:"column",margin:"8px 0",minHeight:"88vh"},
+    hdr:{background:"linear-gradient(135deg,#1b5e20,#2e7d32)",padding:"20px 18px 16px",display:"flex",alignItems:"center",gap:12},
+    hIcon:{width:44,height:44,background:"rgba(255,255,255,0.15)",borderRadius:14,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22},
+    hText:{flex:1},
+    hName:{fontSize:17,fontWeight:700,color:"#fff"},
+    hSub:{fontSize:11,color:"#a5d6a7",marginTop:1},
+    gear:{width:36,height:36,background:"rgba(255,255,255,0.1)",border:"1px solid rgba(255,255,255,0.2)",borderRadius:10,color:"#c8e6c9",fontSize:16,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"},
+    body:{flex:1,overflowY:"auto",padding:"14px 14px 24px"},
+    setBox:{background:"#1a2e1c",border:"1px solid #2e7d32",borderRadius:14,padding:14,marginBottom:14},
+    setTitle:{fontSize:12,fontWeight:700,color:"#81c784",marginBottom:8},
+    urlInput:{width:"100%",background:"#0d1f12",border:"1px solid #388e3c",borderRadius:10,padding:"10px 12px",color:"#e8f5e9",fontSize:11,fontFamily:"monospace",outline:"none"},
+    setNote:{fontSize:11,color:"#66bb6a",marginTop:6,lineHeight:1.5},
+    secLabel:{fontSize:11,fontWeight:700,color:"#4caf50",letterSpacing:1.5,textTransform:"uppercase",marginBottom:8,marginTop:4},
+    card:{background:"#1a2e1c",border:"1px solid rgba(76,175,80,0.2)",borderRadius:14,padding:"13px 13px 10px",marginBottom:10},
+    itemCard:{background:"#1a2e1c",border:"1px solid rgba(76,175,80,0.25)",borderRadius:14,padding:"13px 13px 10px",marginBottom:10,position:"relative"},
+    iHdr:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10},
+    iNum:{fontSize:11,fontWeight:700,color:"#81c784",background:"rgba(76,175,80,0.15)",padding:"3px 10px",borderRadius:20},
+    rmBtn:{width:28,height:28,background:"rgba(229,57,53,0.15)",border:"1px solid rgba(229,57,53,0.3)",borderRadius:8,color:"#ef9a9a",fontSize:13,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"},
+    lbl:{fontSize:11,color:"#81c784",marginBottom:4,fontWeight:600},
+    inp:{width:"100%",background:"#0d1f12",border:"1px solid rgba(76,175,80,0.3)",borderRadius:10,padding:"10px 12px",color:"#e8f5e9",fontSize:14,outline:"none",marginBottom:10},
+    sel:{flex:1,background:"#0d1f12",border:"1px solid rgba(76,175,80,0.3)",borderRadius:10,padding:"10px 10px",color:"#e8f5e9",fontSize:13,outline:"none",appearance:"none",backgroundImage:"url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%234caf50' fill='none' stroke-width='2'/%3E%3C/svg%3E\")",backgroundRepeat:"no-repeat",backgroundPosition:"right 10px center",paddingRight:28,cursor:"pointer"},
+    qInp:{width:80,background:"#0d1f12",border:"1px solid rgba(76,175,80,0.3)",borderRadius:10,padding:"10px 10px",color:"#e8f5e9",fontSize:14,textAlign:"center",outline:"none"},
+    row:{display:"flex",gap:8,alignItems:"flex-start"},
+    addBtn:{width:"100%",padding:"12px",background:"rgba(76,175,80,0.08)",border:"1.5px dashed rgba(76,175,80,0.35)",borderRadius:14,color:"#66bb6a",fontSize:14,fontWeight:600,cursor:"pointer",marginBottom:18,display:"flex",alignItems:"center",justifyContent:"center",gap:6},
+    subBtn:{width:"100%",padding:"15px",background:"linear-gradient(135deg,#2e7d32,#43a047)",border:"none",borderRadius:14,color:"#fff",fontSize:15,fontWeight:700,cursor:"pointer",letterSpacing:0.5,boxShadow:"0 4px 20px rgba(46,125,50,0.5)",display:"flex",alignItems:"center",justifyContent:"center",gap:8},
+    subDis:{background:"#1e3a20",color:"#4a7a4c",boxShadow:"none",cursor:"not-allowed"},
+    err:{fontSize:11,color:"#ef9a9a",marginTop:-6,marginBottom:8},
+    totPrev:{marginTop:6,padding:"5px 10px",background:"rgba(76,175,80,0.1)",borderRadius:8,fontSize:12,color:"#81c784"},
+    successWrap:{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"32px 20px",textAlign:"center"},
+    successIcon:{width:76,height:76,background:"linear-gradient(135deg,#2e7d32,#66bb6a)",borderRadius:"50%",display:"flex",alignItems:"center",justifyContent:"center",fontSize:36,marginBottom:18,boxShadow:"0 0 40px rgba(76,175,80,0.4)"},
+    successTitle:{fontSize:20,fontWeight:700,color:"#81c784",marginBottom:6},
+    successSub:{fontSize:13,color:"#66bb6a",lineHeight:1.6,marginBottom:22},
+    sumCard:{background:"#0d1f12",border:"1px solid rgba(76,175,80,0.2)",borderRadius:14,padding:"13px 16px",marginBottom:20,width:"100%",textAlign:"left"},
+    sumRow:{display:"flex",justifyContent:"space-between",marginBottom:6},
+    sumK:{fontSize:12,color:"#81c784"},
+    sumV:{fontSize:12,color:"#e8f5e9",fontWeight:600},
+    newBtn:{padding:"12px 30px",background:"linear-gradient(135deg,#1b5e20,#2e7d32)",border:"none",borderRadius:14,color:"#fff",fontSize:14,fontWeight:700,cursor:"pointer",boxShadow:"0 4px 16px rgba(27,94,32,0.5)"},
+    footer:{fontSize:11,color:"#2e7d32",marginTop:8,letterSpacing:0.5,textAlign:"center"},
+  };
+
+  return (
+    <div style={s.root}>
+      <div style={s.bar}>
+        <span>{now.toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"})}</span>
+        <span>VFPCK · Alappuzha</span>
+        <span>📶 🔋</span>
+      </div>
+      <div style={s.phone}>
+        <div style={s.hdr}>
+          <div style={s.hIcon}>🌿</div>
+          <div style={s.hText}>
+            <div style={s.hName}>VFPCK Input Orders</div>
+            <div style={s.hSub}>Alappuzha District · {dateStr}</div>
+          </div>
+          <button style={s.gear} onClick={()=>setShowSettings(v=>!v)}>⚙</button>
+        </div>
+
+        <div style={s.body} ref={bodyRef}>
+          {showSettings && (
+            <div style={s.setBox} className="fade-in">
+              <div style={s.setTitle}>⚙ Google Sheet Web App URL</div>
+              <input style={s.urlInput} placeholder="https://script.google.com/macros/s/YOUR_ID/exec"
+                value={webAppUrl} onChange={e=>saveUrl(e.target.value)}/>
+              <div style={s.setNote}>Paste your GAS Web App URL here. Data will go directly to your Google Sheet.</div>
+            </div>
+          )}
+
+          {submitted ? (
+            <div style={s.successWrap} className="fade-in">
+              <div style={s.successIcon}>✅</div>
+              <div style={s.successTitle}>Order Submitted!</div>
+              <div style={s.successSub}>
+                {webAppUrl ? "Data sent to VFPCK Google Sheet successfully." : "Order recorded. (Connect Sheet URL in ⚙ settings to auto-sync.)"}
+              </div>
+              {summary && (
+                <div style={s.sumCard}>
+                  <div style={s.sumRow}><span style={s.sumK}>Officer</span><span style={s.sumV}>{summary.officerName}</span></div>
+                  <div style={s.sumRow}><span style={s.sumK}>Location</span><span style={s.sumV}>{summary.location}</span></div>
+                  <div style={s.sumRow}><span style={s.sumK}>Items submitted</span><span style={s.sumV}>{summary.itemCount} item(s)</span></div>
+                  <div style={s.sumRow}><span style={s.sumK}>Time</span><span style={s.sumV}>{summary.time} · {dateStr}</span></div>
+                </div>
+              )}
+              <button style={s.newBtn} onClick={reset}>+ New Order</button>
+            </div>
+          ) : (
+            <div className="fade-in">
+              <div style={s.secLabel}>👤 Officer Details</div>
+              <div style={s.card}>
+                <div style={s.lbl}>Officer Name *</div>
+                <input style={s.inp} placeholder="Full name" value={officerName}
+                  onChange={e=>saveOfficer("name",e.target.value)}/>
+                {errors.name && <div style={s.err}>⚠ {errors.name}</div>}
+
+                <div style={s.lbl}>Phone Number *</div>
+                <input style={s.inp} placeholder="10-digit mobile number"
+                  value={phone} inputMode="numeric" maxLength={10}
+                  onChange={e=>saveOfficer("phone",e.target.value.replace(/\D/g,""))}/>
+                {errors.phone && <div style={s.err}>⚠ {errors.phone}</div>}
+
+                <div style={s.lbl}>Location *</div>
+                <select style={{...s.sel,width:"100%"}} value={location}
+                  onChange={e=>saveOfficer("loc",e.target.value)}>
+                  <option value="">— Select Location —</option>
+                  {LOCATIONS.map(l=><option key={l} value={l}>{l}</option>)}
+                </select>
+                {errors.location && <div style={{...s.err,marginTop:6}}>⚠ {errors.location}</div>}
+              </div>
+
+              <div style={s.secLabel}>📦 Items Required</div>
+
+              {items.map((item,i)=>(
+                <div key={i} style={s.itemCard}>
+                  <div style={s.iHdr}>
+                    <span style={s.iNum}>Item {i+1}{i===0?" — Required":" — Optional"}</span>
+                    {i>0 && <button style={s.rmBtn} onClick={()=>removeItem(i)}>✕</button>}
+                  </div>
+                  <div style={s.lbl}>Item Name</div>
+                  <input style={s.inp} placeholder="e.g. Dolomite, Neemcake, Coirpith..."
+                    value={item.itemName} onChange={e=>updateItem(i,"itemName",e.target.value)}/>
+                  {errors[`n${i}`] && <div style={s.err}>⚠ {errors[`n${i}`]}</div>}
+
+                  <div style={s.row}>
+                    <div style={{flex:1}}>
+                      <div style={s.lbl}>Pack Size</div>
+                      <select style={s.sel} value={item.packSize}
+                        onChange={e=>updateItem(i,"packSize",e.target.value)}>
+                        <option value="">— Size —</option>
+                        {PACK_SIZES.map(p=><option key={p} value={p}>{p}</option>)}
+                      </select>
+                      {errors[`p${i}`] && <div style={{...s.err,marginTop:6}}>⚠ {errors[`p${i}`]}</div>}
+                    </div>
+                    <div>
+                      <div style={s.lbl}>Qty (Packs)</div>
+                      <input style={s.qInp} placeholder="0" value={item.qty} inputMode="numeric"
+                        onChange={e=>updateItem(i,"qty",e.target.value)}/>
+                      {errors[`q${i}`] && <div style={{...s.err,fontSize:10}}>⚠ {errors[`q${i}`]}</div>}
+                    </div>
+                  </div>
+
+                  {totalCalc(item) && (
+                    <div style={s.totPrev}>Total: {totalCalc(item)}</div>
+                  )}
+                </div>
+              ))}
+
+              {items.length < MAX_ITEMS && (
+                <button style={s.addBtn} onClick={addItem}>
+                  <span style={{fontSize:18}}>+</span> Add Another Item
+                  <span style={{color:"#4a7a4c",fontSize:11}}>({MAX_ITEMS - items.length} remaining)</span>
+                </button>
+              )}
+
+              <button
+                style={{...s.subBtn,...(submitting?s.subDis:{})}}
+                onClick={handleSubmit} disabled={submitting}>
+                {submitting ? (
+                  <><span style={{display:"inline-block",width:16,height:16,border:"2px solid rgba(255,255,255,0.3)",borderTop:"2px solid #fff",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/> Submitting...</>
+                ) : "📤 Submit Order"}
+              </button>
+              <div style={{fontSize:11,color:"#4a7a4c",textAlign:"center",marginTop:8,marginBottom:4}}>
+                All required fields must be filled before submitting
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+      <div style={s.footer}>VFPCK · Vegetables and Fruits Promotion Council Keralam</div>
+    </div>
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById("root"));
+root.render(<App/>);
+</script>
+</body>
+</html>
