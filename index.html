@@ -24,31 +24,95 @@
     @keyframes spin{to{transform:rotate(360deg);}}
     @keyframes fadeIn{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:translateY(0);}}
     .fade{animation:fadeIn 0.35s ease;}
+    .suggestion-box{position:absolute;top:100%;left:0;right:0;background:#1a2e1c;
+      border:1px solid #2e7d32;border-top:none;border-radius:0 0 10px 10px;
+      z-index:100;max-height:160px;overflow-y:auto;}
+    .suggestion-item{padding:10px 12px;font-size:13px;color:#e8f5e9;cursor:pointer;}
+    .suggestion-item:hover{background:#2e7d32;}
+    .input-wrap{position:relative;}
   </style>
 </head>
 <body>
 <div id="root"></div>
 <script type="text/babel">
 
-// ═══════════════════════════════════════════════════
-//  ▼▼▼  PASTE YOUR GOOGLE SHEET WEB APP URL BELOW  ▼▼▼
-// ═══════════════════════════════════════════════════
 const SHEET_URL = "https://script.google.com/macros/s/AKfycbwKOu7b5Wxvh0RNz9T7dn9Tfvc2oWMPvANNiQSYdxOOwUftQNXq6rvAvU6FzYJqpXc/exec";
-// ═══════════════════════════════════════════════════
 
 const LOCATIONS = [
   "Panavally","Cherthala","Mararikkulam","Edathwa","Ramankary",
   "Chennithala","Vallikunnam","Pandanad","Cheriyanadu","Venmony",
-  "Thamarakkulam","Kannanamkuzhi","Nooranad","Thazhakkara","Training Venue"
+  "Thamarakkulam","Kannanamkuzhi","Nooranad","Thazhakkara","Training Venue","Other"
 ];
-const PACK_SIZES = ["2 Kg","5 Kg","10 Kg","50 Kg","NA"];
-const MAX_ITEMS = 8;
-const emptyItem = () => ({ itemName:"", packSize:"", qty:"" });
+const PACK_SIZES = ["1 Kg","2 Kg","5 Kg","10 Kg","50 Kg","100 ml","1 Litre","Other"];
+const MAX_ITEMS = 20;
+const emptyItem = () => ({ itemName:"", packSize:"", customPack:"", qty:"" });
 
+// ── LocalStorage helpers ──────────────────────────────────────
+function getSaved(key) {
+  try { return JSON.parse(localStorage.getItem(key)) || []; } catch{ return []; }
+}
+function addSaved(key, value) {
+  if(!value || !value.trim()) return;
+  const arr = getSaved(key);
+  const filtered = arr.filter(v => v.toLowerCase() !== value.toLowerCase());
+  filtered.unshift(value.trim());
+  localStorage.setItem(key, JSON.stringify(filtered.slice(0, 20)));
+}
+
+// ── AutoSuggest Input ─────────────────────────────────────────
+function AutoInput({ value, onChange, placeholder, storageKey, style, inputMode }) {
+  const [suggestions, setSuggestions] = React.useState([]);
+  const [show, setShow] = React.useState(false);
+  const ref = React.useRef();
+
+  const handleChange = (e) => {
+    const val = e.target.value;
+    onChange(val);
+    if(val.length > 0) {
+      const saved = getSaved(storageKey);
+      const filtered = saved.filter(s => s.toLowerCase().includes(val.toLowerCase()));
+      setSuggestions(filtered);
+      setShow(filtered.length > 0);
+    } else {
+      const saved = getSaved(storageKey);
+      setSuggestions(saved);
+      setShow(saved.length > 0);
+    }
+  };
+
+  const handleFocus = () => {
+    const saved = getSaved(storageKey);
+    if(saved.length > 0) { setSuggestions(saved); setShow(true); }
+  };
+
+  const handleBlur = () => setTimeout(() => setShow(false), 150);
+
+  const handleSelect = (val) => { onChange(val); setShow(false); };
+
+  return (
+    <div className="input-wrap" ref={ref}>
+      <input style={style} value={value} placeholder={placeholder}
+        inputMode={inputMode||"text"}
+        onChange={handleChange} onFocus={handleFocus} onBlur={handleBlur}/>
+      {show && suggestions.length > 0 && (
+        <div className="suggestion-box">
+          {suggestions.map((s,i) => (
+            <div key={i} className="suggestion-item" onMouseDown={()=>handleSelect(s)}>
+              {s}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Main App ──────────────────────────────────────────────────
 function App() {
   const [officerName, setOfficerName] = React.useState(localStorage.getItem("vfpck_officer")||"");
   const [phone, setPhone]             = React.useState(localStorage.getItem("vfpck_phone")||"");
   const [location, setLocation]       = React.useState(localStorage.getItem("vfpck_location")||"");
+  const [customLocation, setCustomLocation] = React.useState("");
   const [items, setItems]             = React.useState([emptyItem()]);
   const [errors, setErrors]           = React.useState({});
   const [submitting, setSubmitting]   = React.useState(false);
@@ -56,34 +120,39 @@ function App() {
   const [summary, setSummary]         = React.useState(null);
   const bodyRef = React.useRef();
 
-  const save = (field, val) => {
+  const saveOfficer = (field, val) => {
     if(field==="name")    { setOfficerName(val); localStorage.setItem("vfpck_officer",val); }
     if(field==="phone")   { setPhone(val);        localStorage.setItem("vfpck_phone",val); }
     if(field==="location"){ setLocation(val);     localStorage.setItem("vfpck_location",val); }
   };
 
   const updateItem = (i,f,v) => setItems(p=>p.map((it,idx)=>idx===i?{...it,[f]:v}:it));
-  const addItem    = () => {
+  const addItem = () => {
     if(items.length < MAX_ITEMS){
       setItems(p=>[...p, emptyItem()]);
-      setTimeout(()=>bodyRef.current?.scrollTo({top:9999,behavior:"smooth"}),120);
+      setTimeout(()=>bodyRef.current?.scrollTo({top:99999,behavior:"smooth"}),120);
     }
   };
   const removeItem = (i) => setItems(p=>p.filter((_,idx)=>idx!==i));
 
+  const getFinalLocation = () => location === "Other" ? customLocation : location;
+  const getFinalPack = (item) => item.packSize === "Other" ? item.customPack : item.packSize;
+
   const validate = () => {
     const e={};
-    if(!officerName.trim())                                          e.name="Required";
-    if(!phone.trim())                                                e.phone="Required";
-    else if(!/^\d{10}$/.test(phone.trim()))                         e.phone="10-digit number required";
-    if(!location)                                                    e.location="Select location";
+    if(!officerName.trim())                               e.name="Required";
+    if(!phone.trim())                                     e.phone="Required";
+    else if(!/^\d{10}$/.test(phone.trim()))               e.phone="10-digit number required";
+    if(!location)                                         e.location="Select location";
+    if(location==="Other" && !customLocation.trim())      e.customLocation="Enter location name";
     items.forEach((it,i)=>{
       const hasAny = it.itemName||it.packSize||it.qty;
       if(i===0||hasAny){
-        if(!it.itemName.trim())                                      e[`n${i}`]="Item name required";
-        if(!it.packSize)                                             e[`p${i}`]="Select pack size";
-        if(!it.qty.toString().trim())                                e[`q${i}`]="Quantity required";
-        else if(isNaN(Number(it.qty))||Number(it.qty)<=0)           e[`q${i}`]="Must be > 0";
+        if(!it.itemName.trim())                           e[`n${i}`]="Item name required";
+        if(!it.packSize)                                  e[`p${i}`]="Select pack size";
+        if(it.packSize==="Other"&&!it.customPack.trim()) e[`cp${i}`]="Enter pack size";
+        if(!it.qty.toString().trim())                     e[`q${i}`]="Required";
+        else if(isNaN(Number(it.qty))||Number(it.qty)<=0) e[`q${i}`]="Must be > 0";
       }
     });
     return e;
@@ -97,19 +166,27 @@ function App() {
       return;
     }
     setSubmitting(true);
-    const filled = items.filter(it=>it.itemName.trim());
-    setSummary({ officerName, location, phone, itemCount:filled.length,
+
+    // Save to localStorage for auto-suggestions
+    addSaved("vfpck_names", officerName);
+    addSaved("vfpck_phones", phone);
+    items.filter(it=>it.itemName.trim()).forEach(it => addSaved("vfpck_items", it.itemName));
+
+    const finalLocation = getFinalLocation();
+    const filled = items
+      .filter(it=>it.itemName.trim())
+      .map(it=>({ itemName: it.itemName, packSize: getFinalPack(it), qty: it.qty }));
+
+    setSummary({ officerName, location: finalLocation, phone, itemCount: filled.length,
       time: new Date().toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"}) });
+
     try {
-      if(SHEET_URL && !SHEET_URL.includes("PASTE_YOUR")){
+      if(SHEET_URL && !SHEET_URL.includes("PASTE")){
         await fetch(SHEET_URL, {
           method:"POST", mode:"no-cors",
           headers:{"Content-Type":"application/json"},
-          body: JSON.stringify({
-            officerName, phone, location,
-            items: filled,
-            timestamp: new Date().toISOString()
-          })
+          body: JSON.stringify({ officerName, phone, location: finalLocation,
+            items: filled, timestamp: new Date().toISOString() })
         });
       }
     } catch(_){}
@@ -123,89 +200,62 @@ function App() {
     setErrors({});
     setSubmitted(false);
     setSummary(null);
+    setCustomLocation("");
   };
 
-  const calcTotal = (it) => {
-    if(!it.packSize||!it.qty||Number(it.qty)<=0) return null;
-    return it.packSize==="NA" ? `${it.qty} nos` : `${parseFloat(it.packSize)*Number(it.qty)} kg`;
+  const calcTotal = (item) => {
+    const pack = getFinalPack(item);
+    if(!pack||!item.qty||Number(item.qty)<=0) return null;
+    if(pack==="NA"||pack==="Other"||isNaN(parseFloat(pack))) return `${item.qty} nos`;
+    const num = parseFloat(pack);
+    return `${num * Number(item.qty)} ${pack.includes("ml")||pack.includes("Litre") ? (pack.includes("ml")?"ml":"L") : "kg"}`;
   };
 
-  const now    = new Date();
-  const dateStr= now.toLocaleDateString("en-IN",{day:"numeric",month:"short",year:"numeric"});
-  const timeStr= now.toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"});
+  const now = new Date();
+  const dateStr = now.toLocaleDateString("en-IN",{day:"numeric",month:"short",year:"numeric"});
+  const timeStr = now.toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"});
 
   const c = {
     root:  {minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",padding:"0 0 28px",background:"#0d1f12"},
-    bar:   {width:"100%",maxWidth:480,padding:"10px 18px 0",display:"flex",justifyContent:"space-between",fontSize:12,color:"#4caf50",letterSpacing:0.5},
+    bar:   {width:"100%",maxWidth:480,padding:"10px 18px 0",display:"flex",justifyContent:"space-between",fontSize:12,color:"#4caf50"},
     phone: {width:"100%",maxWidth:480,background:"#141f16",borderRadius:24,overflow:"hidden",
             boxShadow:"0 24px 80px rgba(0,0,0,0.7),0 0 0 1px rgba(76,175,80,0.15)",
             display:"flex",flexDirection:"column",margin:"8px 0",minHeight:"88vh"},
-    hdr:   {background:"linear-gradient(135deg,#1b5e20,#2e7d32)",padding:"20px 18px 16px",
-            display:"flex",alignItems:"center",gap:12},
-    hIcon: {width:44,height:44,background:"rgba(255,255,255,0.15)",borderRadius:14,
-            display:"flex",alignItems:"center",justifyContent:"center",fontSize:22},
+    hdr:   {background:"linear-gradient(135deg,#1b5e20,#2e7d32)",padding:"20px 18px 16px",display:"flex",alignItems:"center",gap:12},
+    hIcon: {width:44,height:44,background:"rgba(255,255,255,0.15)",borderRadius:14,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22},
     hName: {fontSize:17,fontWeight:700,color:"#fff"},
     hSub:  {fontSize:11,color:"#a5d6a7",marginTop:2},
     body:  {flex:1,overflowY:"auto",padding:"14px 14px 24px"},
-    sLbl:  {fontSize:11,fontWeight:700,color:"#4caf50",letterSpacing:1.5,
-            textTransform:"uppercase",marginBottom:8,marginTop:4},
-    card:  {background:"#1a2e1c",border:"1px solid rgba(76,175,80,0.2)",
-            borderRadius:14,padding:"14px 13px 10px",marginBottom:10},
-    iCard: {background:"#1a2e1c",border:"1px solid rgba(76,175,80,0.25)",
-            borderRadius:14,padding:"13px 13px 10px",marginBottom:10},
+    sLbl:  {fontSize:11,fontWeight:700,color:"#4caf50",letterSpacing:1.5,textTransform:"uppercase",marginBottom:8,marginTop:4},
+    card:  {background:"#1a2e1c",border:"1px solid rgba(76,175,80,0.2)",borderRadius:14,padding:"14px 13px 10px",marginBottom:10},
+    iCard: {background:"#1a2e1c",border:"1px solid rgba(76,175,80,0.25)",borderRadius:14,padding:"13px 13px 10px",marginBottom:10},
     iHdr:  {display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10},
-    iNum:  {fontSize:11,fontWeight:700,color:"#81c784",background:"rgba(76,175,80,0.15)",
-            padding:"3px 10px",borderRadius:20},
-    rmBtn: {width:28,height:28,background:"rgba(229,57,53,0.12)",
-            border:"1px solid rgba(229,57,53,0.3)",borderRadius:8,
-            color:"#ef9a9a",fontSize:13,cursor:"pointer",
-            display:"flex",alignItems:"center",justifyContent:"center"},
+    iNum:  {fontSize:11,fontWeight:700,color:"#81c784",background:"rgba(76,175,80,0.15)",padding:"3px 10px",borderRadius:20},
+    rmBtn: {width:28,height:28,background:"rgba(229,57,53,0.12)",border:"1px solid rgba(229,57,53,0.3)",borderRadius:8,color:"#ef9a9a",fontSize:13,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"},
     lbl:   {fontSize:11,color:"#81c784",marginBottom:5,fontWeight:600},
-    inp:   {width:"100%",background:"#0d1f12",border:"1px solid rgba(76,175,80,0.3)",
-            borderRadius:10,padding:"10px 12px",color:"#e8f5e9",fontSize:14,
-            outline:"none",marginBottom:10},
-    sel:   {background:"#0d1f12",border:"1px solid rgba(76,175,80,0.3)",
-            borderRadius:10,padding:"10px 10px",color:"#e8f5e9",fontSize:13,
-            outline:"none",appearance:"none",
+    inp:   {width:"100%",background:"#0d1f12",border:"1px solid rgba(76,175,80,0.3)",borderRadius:10,padding:"10px 12px",color:"#e8f5e9",fontSize:14,outline:"none",marginBottom:10},
+    sel:   {background:"#0d1f12",border:"1px solid rgba(76,175,80,0.3)",borderRadius:10,padding:"10px 10px",color:"#e8f5e9",fontSize:13,outline:"none",appearance:"none",
             backgroundImage:"url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%234caf50' fill='none' stroke-width='2'/%3E%3C/svg%3E\")",
-            backgroundRepeat:"no-repeat",backgroundPosition:"right 10px center",
-            paddingRight:28,cursor:"pointer"},
-    qInp:  {width:78,background:"#0d1f12",border:"1px solid rgba(76,175,80,0.3)",
-            borderRadius:10,padding:"10px 8px",color:"#e8f5e9",
-            fontSize:14,textAlign:"center",outline:"none"},
+            backgroundRepeat:"no-repeat",backgroundPosition:"right 10px center",paddingRight:28,cursor:"pointer"},
+    qInp:  {width:78,background:"#0d1f12",border:"1px solid rgba(76,175,80,0.3)",borderRadius:10,padding:"10px 8px",color:"#e8f5e9",fontSize:14,textAlign:"center",outline:"none"},
     row:   {display:"flex",gap:8,alignItems:"flex-start"},
     err:   {fontSize:11,color:"#ef9a9a",marginTop:-6,marginBottom:8},
-    tot:   {marginTop:5,padding:"5px 10px",background:"rgba(76,175,80,0.1)",
-            borderRadius:8,fontSize:12,color:"#81c784",fontWeight:600},
-    addBtn:{width:"100%",padding:"12px",background:"rgba(76,175,80,0.07)",
-            border:"1.5px dashed rgba(76,175,80,0.35)",borderRadius:14,
-            color:"#66bb6a",fontSize:14,fontWeight:600,cursor:"pointer",
-            marginBottom:18,display:"flex",alignItems:"center",justifyContent:"center",gap:6},
-    subBtn:{width:"100%",padding:"15px",
-            background:"linear-gradient(135deg,#2e7d32,#43a047)",
-            border:"none",borderRadius:14,color:"#fff",fontSize:15,
-            fontWeight:700,cursor:"pointer",letterSpacing:0.5,
-            boxShadow:"0 4px 20px rgba(46,125,50,0.45)",
-            display:"flex",alignItems:"center",justifyContent:"center",gap:8},
+    tot:   {marginTop:5,padding:"5px 10px",background:"rgba(76,175,80,0.1)",borderRadius:8,fontSize:12,color:"#81c784",fontWeight:600},
+    addBtn:{width:"100%",padding:"12px",background:"rgba(76,175,80,0.07)",border:"1.5px dashed rgba(76,175,80,0.35)",borderRadius:14,color:"#66bb6a",fontSize:14,fontWeight:600,cursor:"pointer",marginBottom:18,display:"flex",alignItems:"center",justifyContent:"center",gap:6},
+    subBtn:{width:"100%",padding:"15px",background:"linear-gradient(135deg,#2e7d32,#43a047)",border:"none",borderRadius:14,color:"#fff",fontSize:15,fontWeight:700,cursor:"pointer",letterSpacing:0.5,boxShadow:"0 4px 20px rgba(46,125,50,0.45)",display:"flex",alignItems:"center",justifyContent:"center",gap:8},
     subDis:{background:"#1e3a20",color:"#4a7a4c",boxShadow:"none",cursor:"not-allowed"},
     hint:  {fontSize:11,color:"#4a7a4c",textAlign:"center",marginTop:8},
-    // success
-    sWrap: {flex:1,display:"flex",flexDirection:"column",alignItems:"center",
-            justifyContent:"center",padding:"32px 20px",textAlign:"center"},
-    sIcon: {width:80,height:80,background:"linear-gradient(135deg,#2e7d32,#66bb6a)",
-            borderRadius:"50%",display:"flex",alignItems:"center",justifyContent:"center",
-            fontSize:38,marginBottom:20,boxShadow:"0 0 40px rgba(76,175,80,0.4)"},
+    sWrap: {flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"32px 20px",textAlign:"center"},
+    sIcon: {width:80,height:80,background:"linear-gradient(135deg,#2e7d32,#66bb6a)",borderRadius:"50%",display:"flex",alignItems:"center",justifyContent:"center",fontSize:38,marginBottom:20,boxShadow:"0 0 40px rgba(76,175,80,0.4)"},
     sTitle:{fontSize:21,fontWeight:700,color:"#81c784",marginBottom:8},
     sSub:  {fontSize:13,color:"#66bb6a",lineHeight:1.7,marginBottom:24},
-    sCard: {background:"#0d1f12",border:"1px solid rgba(76,175,80,0.2)",borderRadius:14,
-            padding:"14px 16px",marginBottom:22,width:"100%",textAlign:"left"},
+    sCard: {background:"#0d1f12",border:"1px solid rgba(76,175,80,0.2)",borderRadius:14,padding:"14px 16px",marginBottom:22,width:"100%",textAlign:"left"},
     sRow:  {display:"flex",justifyContent:"space-between",marginBottom:7},
     sK:    {fontSize:12,color:"#81c784"},
     sV:    {fontSize:12,color:"#e8f5e9",fontWeight:600},
-    newBtn:{padding:"12px 32px",background:"linear-gradient(135deg,#1b5e20,#2e7d32)",
-            border:"none",borderRadius:14,color:"#fff",fontSize:14,
-            fontWeight:700,cursor:"pointer",boxShadow:"0 4px 16px rgba(27,94,32,0.5)"},
-    footer:{fontSize:11,color:"#2e7d32",marginTop:8,letterSpacing:0.5,textAlign:"center"},
+    newBtn:{padding:"12px 32px",background:"linear-gradient(135deg,#1b5e20,#2e7d32)",border:"none",borderRadius:14,color:"#fff",fontSize:14,fontWeight:700,cursor:"pointer",boxShadow:"0 4px 16px rgba(27,94,32,0.5)"},
+    otherBox:{background:"rgba(76,175,80,0.08)",border:"1px solid rgba(76,175,80,0.3)",borderRadius:10,padding:"10px 12px",marginTop:6,width:"100%",color:"#e8f5e9",fontSize:14,outline:"none"},
+    slotCount:{fontSize:11,color:"#4a7a4c",textAlign:"right",marginBottom:6},
   };
 
   return (
@@ -215,9 +265,7 @@ function App() {
         <span>VFPCK · Alappuzha</span>
         <span>📶 🔋</span>
       </div>
-
       <div style={c.phone}>
-        {/* Header */}
         <div style={c.hdr}>
           <div style={c.hIcon}>🌿</div>
           <div style={{flex:1}}>
@@ -226,56 +274,59 @@ function App() {
           </div>
         </div>
 
-        {/* Body */}
         <div style={c.body} ref={bodyRef}>
-
           {submitted ? (
-            /* ── SUCCESS ── */
             <div style={c.sWrap} className="fade">
               <div style={c.sIcon}>✅</div>
               <div style={c.sTitle}>Order Submitted!</div>
-              <div style={c.sSub}>
-                Your order has been recorded successfully{"\n"}and sent to VFPCK office.
-              </div>
+              <div style={c.sSub}>Your order has been recorded and sent to VFPCK office successfully.</div>
               {summary && (
                 <div style={c.sCard}>
-                  <div style={c.sRow}><span style={c.sK}>Officer</span>   <span style={c.sV}>{summary.officerName}</span></div>
-                  <div style={c.sRow}><span style={c.sK}>Phone</span>     <span style={c.sV}>{summary.phone}</span></div>
-                  <div style={c.sRow}><span style={c.sK}>Location</span>  <span style={c.sV}>{summary.location}</span></div>
-                  <div style={c.sRow}><span style={c.sK}>Items</span>     <span style={c.sV}>{summary.itemCount} item(s)</span></div>
-                  <div style={c.sRow}><span style={c.sK}>Time</span>      <span style={c.sV}>{summary.time} · {dateStr}</span></div>
+                  <div style={c.sRow}><span style={c.sK}>Officer</span><span style={c.sV}>{summary.officerName}</span></div>
+                  <div style={c.sRow}><span style={c.sK}>Phone</span><span style={c.sV}>{summary.phone}</span></div>
+                  <div style={c.sRow}><span style={c.sK}>Location</span><span style={c.sV}>{summary.location}</span></div>
+                  <div style={c.sRow}><span style={c.sK}>Items submitted</span><span style={c.sV}>{summary.itemCount} item(s)</span></div>
+                  <div style={c.sRow}><span style={c.sK}>Time</span><span style={c.sV}>{summary.time} · {dateStr}</span></div>
                 </div>
               )}
               <button style={c.newBtn} onClick={reset}>+ New Order</button>
             </div>
           ) : (
-            /* ── FORM ── */
             <div className="fade">
               {/* Officer Details */}
               <div style={c.sLbl}>👤 Officer Details</div>
               <div style={c.card}>
                 <div style={c.lbl}>Officer Name *</div>
-                <input style={c.inp} placeholder="Full name"
-                  value={officerName} onChange={e=>save("name",e.target.value)}/>
+                <AutoInput style={c.inp} placeholder="Full name"
+                  value={officerName} storageKey="vfpck_names"
+                  onChange={v=>saveOfficer("name",v)}/>
                 {errors.name && <div style={c.err}>⚠ {errors.name}</div>}
 
                 <div style={c.lbl}>Phone Number *</div>
-                <input style={c.inp} placeholder="10-digit mobile number"
-                  value={phone} inputMode="numeric" maxLength={10}
-                  onChange={e=>save("phone",e.target.value.replace(/\D/g,""))}/>
+                <AutoInput style={c.inp} placeholder="10-digit mobile number"
+                  value={phone} storageKey="vfpck_phones" inputMode="numeric"
+                  onChange={v=>saveOfficer("phone",v.replace(/\D/g,"").slice(0,10))}/>
                 {errors.phone && <div style={c.err}>⚠ {errors.phone}</div>}
 
                 <div style={c.lbl}>Location *</div>
                 <select style={{...c.sel,width:"100%"}} value={location}
-                  onChange={e=>save("location",e.target.value)}>
+                  onChange={e=>saveOfficer("location",e.target.value)}>
                   <option value="">— Select Location —</option>
                   {LOCATIONS.map(l=><option key={l} value={l}>{l}</option>)}
                 </select>
                 {errors.location && <div style={{...c.err,marginTop:6}}>⚠ {errors.location}</div>}
+
+                {location==="Other" && (
+                  <input style={{...c.otherBox}} placeholder="Enter your location name"
+                    value={customLocation} onChange={e=>setCustomLocation(e.target.value)}/>
+                )}
+                {errors.customLocation && <div style={{...c.err,marginTop:4}}>⚠ {errors.customLocation}</div>}
               </div>
 
               {/* Items */}
               <div style={c.sLbl}>📦 Items Required</div>
+              <div style={c.slotCount}>{items.length}/{MAX_ITEMS} slots used</div>
+
               {items.map((item,i)=>(
                 <div key={i} style={c.iCard}>
                   <div style={c.iHdr}>
@@ -284,10 +335,10 @@ function App() {
                   </div>
 
                   <div style={c.lbl}>Item Name</div>
-                  <input style={c.inp}
-                    placeholder="e.g. Dolomite, Neemcake, Coirpith, DAP..."
-                    value={item.itemName}
-                    onChange={e=>updateItem(i,"itemName",e.target.value)}/>
+                  <AutoInput style={c.inp}
+                    placeholder="e.g. Dolomite, Neemcake, DAP..."
+                    value={item.itemName} storageKey="vfpck_items"
+                    onChange={v=>updateItem(i,"itemName",v)}/>
                   {errors[`n${i}`] && <div style={c.err}>⚠ {errors[`n${i}`]}</div>}
 
                   <div style={c.row}>
@@ -299,6 +350,13 @@ function App() {
                         {PACK_SIZES.map(p=><option key={p} value={p}>{p}</option>)}
                       </select>
                       {errors[`p${i}`] && <div style={{...c.err,marginTop:6}}>⚠ {errors[`p${i}`]}</div>}
+                      {item.packSize==="Other" && (
+                        <input style={{...c.otherBox,marginTop:6,display:"block"}}
+                          placeholder="e.g. 250g, 2L, 15 nos..."
+                          value={item.customPack||""}
+                          onChange={e=>updateItem(i,"customPack",e.target.value)}/>
+                      )}
+                      {errors[`cp${i}`] && <div style={{...c.err,marginTop:4}}>⚠ {errors[`cp${i}`]}</div>}
                     </div>
                     <div>
                       <div style={c.lbl}>Qty (Packs)</div>
@@ -323,8 +381,7 @@ function App() {
                 </button>
               )}
 
-              <button
-                style={{...c.subBtn,...(submitting?c.subDis:{})}}
+              <button style={{...c.subBtn,...(submitting?c.subDis:{})}}
                 onClick={handleSubmit} disabled={submitting}>
                 {submitting
                   ? <><span style={{display:"inline-block",width:16,height:16,
@@ -338,7 +395,9 @@ function App() {
           )}
         </div>
       </div>
-      <div style={c.footer}>VFPCK · Vegetables and Fruits Promotion Council Keralam</div>
+      <div style={{fontSize:11,color:"#2e7d32",marginTop:8,letterSpacing:0.5,textAlign:"center"}}>
+        VFPCK · Vegetables and Fruits Promotion Council Keralam
+      </div>
     </div>
   );
 }
